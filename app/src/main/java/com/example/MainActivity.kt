@@ -47,6 +47,8 @@ import com.example.data.model.InvoiceEntity
 import com.example.data.model.InvoiceItemEntity
 import com.example.data.model.InvoiceWithItems
 import com.example.data.model.ProductEntity
+import com.example.services.ReportExportService
+import com.example.data.model.StockMovementEntity
 import com.example.data.repository.InvoiceRepository
 import com.example.ui.theme.*
 import kotlinx.coroutines.flow.*
@@ -72,6 +74,8 @@ import com.example.services.InvoicePdfService
 import com.example.services.IntegrationServices
 import com.example.services.StorageService
 import com.example.utils.Company
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.nativeCanvas
 
 // --- Navigation Screens ---
 sealed class Screen {
@@ -751,20 +755,15 @@ fun DashboardScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Box(
+                    Image(
+                        painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
+                        contentDescription = "Ceyvana Logo",
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "C",
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit
+                    )
                     Text(
                         text = "Ceyvana",
                         style = MaterialTheme.typography.titleLarge,
@@ -1020,7 +1019,7 @@ fun DashboardScreen(
                     .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("All", "Draft", "Sent", "Paid", "Overdue").forEach { status ->
+                listOf("All", "Draft", "Sent", "Paid", "Overdue", "Cancelled").forEach { status ->
                     val isSelected = selectedFilter == status
                     FilterChip(
                         selected = isSelected,
@@ -1125,6 +1124,7 @@ fun InvoiceListItem(
         "paid" -> StatusPaid
         "sent" -> StatusSent
         "overdue" -> StatusOverdue
+        "cancelled" -> StatusCancelled
         else -> StatusDraft
     }
 
@@ -1132,6 +1132,7 @@ fun InvoiceListItem(
         "paid" -> Icons.Outlined.Check
         "sent" -> Icons.Outlined.Info
         "overdue" -> Icons.Outlined.ErrorOutline
+        "cancelled" -> Icons.Filled.Cancel
         else -> Icons.Outlined.Schedule
     }
 
@@ -1219,6 +1220,7 @@ fun StatusPill(status: String) {
         "paid" -> StatusPaid
         "sent" -> StatusSent
         "overdue" -> StatusOverdue
+        "cancelled" -> StatusCancelled
         else -> StatusDraft
     }
     Box(
@@ -1339,7 +1341,7 @@ fun InvoiceDetailScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Mark as:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                listOf("Paid", "Sent", "Draft", "Overdue").forEach { s ->
+                listOf("Paid", "Sent", "Draft", "Overdue", "Cancelled").forEach { s ->
                     val isCurrent = invoice.status.equals(s, ignoreCase = true)
                     Button(
                         onClick = {
@@ -1448,6 +1450,7 @@ fun InvoiceDetailScreen(
                                     "sent" -> StatusSent
                                     "overdue" -> StatusOverdue
                                     "draft" -> StatusDraft
+                                    "cancelled" -> StatusCancelled
                                     else -> Color.Gray
                                 }, fontWeight = FontWeight.Bold)
                             }
@@ -2408,12 +2411,12 @@ fun AddEditInvoiceScreen(
 
             // Status select Row
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("Status:", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-                listOf("Draft", "Sent", "Paid", "Overdue").forEach { s ->
+                listOf("Draft", "Sent", "Paid", "Overdue", "Cancelled").forEach { s ->
                     val isSelected = status == s
                     Button(
                         onClick = { status = s },
@@ -2691,7 +2694,19 @@ fun ClientListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Customers Directory", fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
+                            contentDescription = "Ceyvana Logo",
+                            modifier = Modifier.size(28.dp).clip(CircleShape)
+                        )
+                        Text("Customers Directory", fontWeight = FontWeight.Bold)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -3425,6 +3440,7 @@ fun ProductListScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var productToEdit by remember { mutableStateOf<ProductEntity?>(null) }
     var productToAdjustStock by remember { mutableStateOf<ProductEntity?>(null) }
+    var selectedProductForHistory by remember { mutableStateOf<ProductEntity?>(null) }
 
     val categoriesList = listOf("All", "Whole Spices", "Ground Spices", "Herbs", "Spice Mixes", "Tea", "Packaging", "Export Products", "Low Stock ⚠️")
 
@@ -3456,7 +3472,19 @@ fun ProductListScreen(
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text("Products", fontWeight = FontWeight.Bold) },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
+                                contentDescription = "Ceyvana Logo",
+                                modifier = Modifier.size(28.dp).clip(CircleShape)
+                            )
+                            Text("Products", fontWeight = FontWeight.Bold)
+                        }
+                    },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -3553,7 +3581,10 @@ fun ProductListScreen(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 shape = RoundedCornerShape(16.dp),
                                 border = BorderStroke(1.dp, if (isLowStock) Color(0xFFD32F2F).copy(alpha = 0.6f) else SleekBorder),
-                                modifier = Modifier.fillMaxWidth().testTag("product_card_${prod.id}")
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("product_card_${prod.id}")
+                                    .clickable { selectedProductForHistory = prod }
                             ) {
                                 Column(
                                     modifier = Modifier.padding(16.dp),
@@ -3900,6 +3931,176 @@ fun ProductListScreen(
             }
         }
     }
+
+    if (selectedProductForHistory != null) {
+        ProductStockHistoryDialog(
+            product = selectedProductForHistory!!,
+            movements = stockMovements,
+            onDismiss = { selectedProductForHistory = null }
+        )
+    }
+}
+
+@Composable
+fun ProductStockHistoryDialog(
+    product: ProductEntity,
+    movements: List<StockMovementEntity>,
+    onDismiss: () -> Unit
+) {
+    val sdfDisplay = remember { java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault()) }
+    
+    val prodMovements = remember(movements, product) {
+        movements.filter { it.productId == product.id }
+            .sortedByDescending { it.timestamp }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "Stock History",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = product.name,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+            ) {
+                if (prodMovements.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.History,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "No stock history recorded",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(prodMovements) { mov ->
+                            val formattedDate = remember(mov.timestamp) {
+                                try {
+                                    val date = java.util.Date(mov.timestamp)
+                                    sdfDisplay.format(date)
+                                } catch (e: Exception) {
+                                    mov.date.ifBlank { "Recent" }
+                                }
+                            }
+                            
+                            val isIncoming = mov.type == "IN" || (mov.type == "ADJUSTMENT" && mov.changeAmount >= 0)
+                            val formattedQty = if (mov.quantity % 1 == 0.0) mov.quantity.toInt().toString() else mov.quantity.toString()
+                            val displayQty = if (isIncoming) "+$formattedQty" else "-$formattedQty"
+                            val qtyColor = if (isIncoming) Color(0xFF107C41) else MaterialTheme.colorScheme.error
+                            val typeLabel = when (mov.type) {
+                                "IN" -> "Purchased"
+                                "OUT" -> "Sold"
+                                "ADJUSTMENT" -> "Adjustment"
+                                else -> mov.reason
+                            }
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(qtyColor.copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        val icon = if (isIncoming) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = null,
+                                            tint = qtyColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    
+                                    Column {
+                                        Text(
+                                            text = typeLabel,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (mov.reference.isNotBlank()) {
+                                            Text(
+                                                text = "Invoice ${mov.reference}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = displayQty,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = qtyColor
+                                    )
+                                    Text(
+                                        text = formattedDate,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.testTag("dismiss_stock_history_dialog")
+            ) {
+                Text("Close")
+            }
+        },
+        shape = RoundedCornerShape(16.dp)
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3929,7 +4130,19 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings & Integrations", fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
+                            contentDescription = "Ceyvana Logo",
+                            modifier = Modifier.size(28.dp).clip(CircleShape)
+                        )
+                        Text("Settings & Integrations", fontWeight = FontWeight.Bold)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -4341,11 +4554,10 @@ fun HomeScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Filled.Spa,
+                        Image(
+                            painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
                             contentDescription = "Ceyvana Logo",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(28.dp).clip(CircleShape)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
@@ -4757,13 +4969,13 @@ fun SplashScreen(onSplashFinished: () -> Unit) {
         ) {
             // Company Logo
             Image(
-                painter = painterResource(id = R.drawable.img_app_icon_1783481283102_1783485421993),
+                painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
                 contentDescription = "Ceyvana Logo",
                 modifier = Modifier
                     .size(120.dp)
                     .clip(CircleShape)
                     .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Fit
             )
             Spacer(modifier = Modifier.height(24.dp))
             Text(
@@ -4789,44 +5001,325 @@ fun SplashScreen(onSplashFinished: () -> Unit) {
     }
 }
 
+// --- Helper Model for Sales Trend ---
+data class TrendPoint(val label: String, val value: Double)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportsScreen(
     viewModel: InvoiceViewModel,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val invoices by viewModel.invoices.collectAsStateWithLifecycle()
-    var selectedFilter by remember { mutableStateOf("All") }
-
-    val filteredInvoices = remember(invoices, selectedFilter) {
+    val products by viewModel.products.collectAsStateWithLifecycle()
+    val clients by viewModel.clients.collectAsStateWithLifecycle()
+    
+    var selectedFilter by remember { mutableStateOf("Today") }
+    var selectedCustomerFilter by remember { mutableStateOf("All") }
+    var selectedProductFilter by remember { mutableStateOf("All") }
+    var selectedCategoryFilter by remember { mutableStateOf("All") }
+    var selectedPaymentMethodFilter by remember { mutableStateOf("All") }
+    var selectedCurrencyFilter by remember { mutableStateOf("All") }
+    
+    // Derived selector options
+    val clientNames = remember(clients) { listOf("All") + clients.map { it.name }.distinct().sorted() }
+    val productNames = remember(products) { listOf("All") + products.map { it.name }.distinct().sorted() }
+    val categories = remember(products) { listOf("All") + products.map { it.category }.distinct().filter { it.isNotBlank() }.sorted() }
+    val paymentMethods = listOf("All", "Bank Transfer", "Cash", "Cheque", "Online Payment", "Letter of Credit")
+    val currencies = listOf("All", "LKR", "USD")
+    
+    // Custom Range State
+    var customStartDate by remember { mutableStateOf<Long?>(null) }
+    var customEndDate by remember { mutableStateOf<Long?>(null) }
+    var showCustomRangeDialog by remember { mutableStateOf(false) }
+    var selectedCustomerForDetail by remember { mutableStateOf<String?>(null) }
+    
+    val filteredInvoices = remember(
+        invoices, selectedFilter, customStartDate, customEndDate,
+        selectedCustomerFilter, selectedProductFilter, selectedCategoryFilter,
+        selectedPaymentMethodFilter, selectedCurrencyFilter, products
+    ) {
         val now = System.currentTimeMillis()
-        val dayInMs = 24 * 60 * 60 * 1000L
-        when (selectedFilter) {
-            "Today" -> invoices.filter { it.invoice.issueDate >= now - dayInMs }
-            "This Week" -> invoices.filter { it.invoice.issueDate >= now - 7 * dayInMs }
-            "This Month" -> invoices.filter { it.invoice.issueDate >= now - 30 * dayInMs }
-            "This Year" -> invoices.filter { it.invoice.issueDate >= now - 365 * dayInMs }
+        val calendar = java.util.Calendar.getInstance()
+        calendar.timeInMillis = now
+        
+        // Start of today
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfToday = calendar.timeInMillis
+        
+        var result = when (selectedFilter) {
+            "Today" -> invoices.filter { it.invoice.issueDate >= startOfToday }
+            "Yesterday" -> {
+                calendar.timeInMillis = startOfToday
+                calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+                val startOfYesterday = calendar.timeInMillis
+                calendar.add(java.util.Calendar.DAY_OF_YEAR, 1)
+                val endOfYesterday = calendar.timeInMillis - 1L
+                invoices.filter { it.invoice.issueDate in startOfYesterday..endOfYesterday }
+            }
+            "This Week" -> {
+                calendar.set(java.util.Calendar.DAY_OF_WEEK, calendar.firstDayOfWeek)
+                val startOfWeek = calendar.timeInMillis
+                invoices.filter { it.invoice.issueDate >= startOfWeek }
+            }
+            "This Month" -> {
+                calendar.set(java.util.Calendar.DAY_OF_MONTH, 1)
+                val startOfMonth = calendar.timeInMillis
+                invoices.filter { it.invoice.issueDate >= startOfMonth }
+            }
+            "This Year" -> {
+                calendar.set(java.util.Calendar.DAY_OF_YEAR, 1)
+                val startOfYear = calendar.timeInMillis
+                invoices.filter { it.invoice.issueDate >= startOfYear }
+            }
+            "Custom Date Range" -> {
+                val s = customStartDate ?: 0L
+                val e = customEndDate?.let {
+                    val cal = java.util.Calendar.getInstance()
+                    cal.timeInMillis = it
+                    cal.set(java.util.Calendar.HOUR_OF_DAY, 23)
+                    cal.set(java.util.Calendar.MINUTE, 59)
+                    cal.set(java.util.Calendar.SECOND, 59)
+                    cal.timeInMillis
+                } ?: Long.MAX_VALUE
+                invoices.filter { it.invoice.issueDate in s..e }
+            }
             else -> invoices
         }
+
+        // Filter by Customer
+        if (selectedCustomerFilter != "All") {
+            result = result.filter { it.invoice.clientName.trim().equals(selectedCustomerFilter.trim(), ignoreCase = true) }
+        }
+
+        // Filter by Payment Method
+        if (selectedPaymentMethodFilter != "All") {
+            result = result.filter { it.invoice.paymentMethod.trim().equals(selectedPaymentMethodFilter.trim(), ignoreCase = true) }
+        }
+
+        // Filter by Currency
+        if (selectedCurrencyFilter != "All") {
+            result = result.filter { it.invoice.currency.trim().equals(selectedCurrencyFilter.trim(), ignoreCase = true) }
+        }
+
+        // Filter by Product
+        if (selectedProductFilter != "All") {
+            result = result.filter { inv ->
+                inv.items.any { item -> item.name.trim().equals(selectedProductFilter.trim(), ignoreCase = true) }
+            }
+        }
+
+        // Filter by Category
+        if (selectedCategoryFilter != "All") {
+            result = result.filter { inv ->
+                inv.items.any { item ->
+                    val matchedProduct = products.find { it.name.trim().equals(item.name.trim(), ignoreCase = true) }
+                    val cat = matchedProduct?.category ?: ""
+                    cat.trim().equals(selectedCategoryFilter.trim(), ignoreCase = true)
+                }
+            }
+        }
+
+        result
     }
 
-    // Calculations
+    // Key metrics calculations
+    val dashboardMetrics = remember(invoices) {
+        com.example.services.ReportsService.calculateDashboardMetrics(invoices)
+    }
     val totalRevenue = filteredInvoices.filter { it.invoice.status.equals("Paid", ignoreCase = true) }.sumOf { it.invoice.total }
     val totalOutstanding = filteredInvoices.filter { !it.invoice.status.equals("Paid", ignoreCase = true) }.sumOf { it.invoice.total }
     val totalBilled = filteredInvoices.sumOf { it.invoice.total }
+    val invoicesCount = filteredInvoices.size
+    val customersCount = filteredInvoices.map { it.invoice.clientName }.distinct().size
 
-    val statusCounts = filteredInvoices.groupBy { it.invoice.status }.mapValues { it.value.size }
-    val paidCount = statusCounts["Paid"] ?: 0
-    val sentCount = statusCounts["Sent"] ?: 0
-    val draftCount = statusCounts["Draft"] ?: 0
-    val overdueCount = statusCounts["Overdue"] ?: 0
+    // Today's Sales Summary calculations
+    val todayInvoices = remember(invoices) {
+        val now = System.currentTimeMillis()
+        val calendar = java.util.Calendar.getInstance()
+        calendar.timeInMillis = now
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfToday = calendar.timeInMillis
+        invoices.filter { it.invoice.issueDate >= startOfToday }
+    }
+    val todaySales = todayInvoices.sumOf { it.invoice.total }
+    val todayInvoicesCount = todayInvoices.size
+    val todayCustomersCount = todayInvoices.map { it.invoice.clientName }.distinct().size
+    val todayAverageInvoice = if (todayInvoicesCount > 0) todaySales / todayInvoicesCount else 0.0
+
+    // Monthly Sales Summary calculations (current calendar month)
+    val monthInvoices = remember(invoices) {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.set(java.util.Calendar.DAY_OF_MONTH, 1)
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfMonth = calendar.timeInMillis
+        invoices.filter { it.invoice.issueDate >= startOfMonth }
+    }
+    val monthSales = monthInvoices.sumOf { it.invoice.total }
+    val monthInvoicesCount = monthInvoices.size
+    val monthCustomersCount = monthInvoices.map { it.invoice.clientName }.distinct().size
+    val monthAverageInvoice = if (monthInvoicesCount > 0) monthSales / monthInvoicesCount else 0.0
+
+    // Title label for the main card depending on selected range
+    val salesCardTitle = when (selectedFilter) {
+        "Today" -> "Today's Sales"
+        "This Week" -> "Weekly Sales"
+        "This Month" -> "Monthly Sales"
+        "This Year" -> "Yearly Sales"
+        "Custom Date Range" -> "Period Sales"
+        else -> "Total Sales"
+    }
+
+    // Dialog trigger helper for native DatePickerDialog
+    val showDatePickerNative = { initialTime: Long, onDateSelected: (Long) -> Unit ->
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = initialTime
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val selectedCal = java.util.Calendar.getInstance()
+                selectedCal.set(java.util.Calendar.YEAR, year)
+                selectedCal.set(java.util.Calendar.MONTH, month)
+                selectedCal.set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+                selectedCal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                selectedCal.set(java.util.Calendar.MINUTE, 0)
+                selectedCal.set(java.util.Calendar.SECOND, 0)
+                selectedCal.set(java.util.Calendar.MILLISECOND, 0)
+                onDateSelected(selectedCal.timeInMillis)
+            },
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH),
+            cal.get(java.util.Calendar.DAY_OF_MONTH)
+        ).show()
+    }
+
+    if (selectedCustomerForDetail != null) {
+        CustomerReportDetailDialog(
+            clientName = selectedCustomerForDetail!!,
+            allInvoices = invoices,
+            onDismiss = { selectedCustomerForDetail = null }
+        )
+    }
+
+    if (showCustomRangeDialog) {
+        var startTemp by remember { mutableStateOf(customStartDate ?: System.currentTimeMillis()) }
+        var endTemp by remember { mutableStateOf(customEndDate ?: System.currentTimeMillis()) }
+        val dateSdf = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+
+        AlertDialog(
+            onDismissRequest = { showCustomRangeDialog = false },
+            title = { Text("Select Custom Range", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Text(
+                        "Choose the date interval for reporting.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    // Start Date Button
+                    OutlinedButton(
+                        onClick = {
+                            showDatePickerNative(startTemp) { selected ->
+                                startTemp = selected
+                                if (startTemp > endTemp) {
+                                    endTemp = startTemp
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("custom_start_date_btn"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(horizontalAlignment = Alignment.Start) {
+                                Text("Start Date", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(dateSdf.format(java.util.Date(startTemp)), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                            Icon(Icons.Filled.CalendarToday, contentDescription = "Pick Start Date")
+                        }
+                    }
+
+                    // End Date Button
+                    OutlinedButton(
+                        onClick = {
+                            showDatePickerNative(endTemp) { selected ->
+                                endTemp = selected
+                                if (endTemp < startTemp) {
+                                    startTemp = endTemp
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("custom_end_date_btn"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(horizontalAlignment = Alignment.Start) {
+                                Text("End Date", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(dateSdf.format(java.util.Date(endTemp)), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                            Icon(Icons.Filled.CalendarToday, contentDescription = "Pick End Date")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        customStartDate = startTemp
+                        customEndDate = endTemp
+                        showCustomRangeDialog = false
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("apply_custom_range_btn")
+                ) {
+                    Text("Apply Range")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomRangeDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Business Reports", fontWeight = FontWeight.Bold) },
+                title = { 
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
+                            contentDescription = "Ceyvana Logo",
+                            modifier = Modifier.size(28.dp).clip(CircleShape)
+                        )
+                        Text("Reports", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                    }
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("reports_back_btn")) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -4842,294 +5335,2223 @@ fun ReportsScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(bottom = 24.dp)
         ) {
-            // Time period Filter Chips
+            // Filter Horizontal Scroll Row
+            val filters = listOf("Today", "Yesterday", "This Week", "This Month", "This Year", "Custom Date Range")
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("All", "Today", "Week", "Month", "Year").forEach { filter ->
-                    val isSelected = (filter == "All" && selectedFilter == "All") ||
-                                     (filter == "Today" && selectedFilter == "Today") ||
-                                     (filter == "Week" && selectedFilter == "This Week") ||
-                                     (filter == "Month" && selectedFilter == "This Month") ||
-                                     (filter == "Year" && selectedFilter == "This Year")
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(
-                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .clickable {
-                                selectedFilter = when (filter) {
-                                    "Week" -> "This Week"
-                                    "Month" -> "This Month"
-                                    "Year" -> "This Year"
-                                    else -> filter
-                                }
+                filters.forEach { filter ->
+                    val isSelected = selectedFilter == filter
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            selectedFilter = filter
+                            if (filter == "Custom Date Range") {
+                                showCustomRangeDialog = true
                             }
-                    ) {
-                        Text(
-                            text = filter,
-                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                        },
+                        label = { Text(filter) },
+                        leadingIcon = if (isSelected) {
+                            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                        } else null,
+                        modifier = Modifier.testTag("filter_chip_${filter.replace(" ", "_").lowercase()}")
+                    )
                 }
             }
 
-            // Summary Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "Total Billing Value",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                    )
-                    Text(
-                        text = "Rs. %,.2f".format(totalBilled),
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+            // Custom Range Info Banner if custom selected
+            if (selectedFilter == "Custom Date Range" && customStartDate != null && customEndDate != null) {
+                val bannerSdf = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
+                            Text("Active Interval", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
                             Text(
-                                text = "REVENUE RECEIVED",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-                            )
-                            Text(
-                                text = "Rs. %,.2f".format(totalRevenue),
-                                style = MaterialTheme.typography.titleMedium,
+                                "${bannerSdf.format(java.util.Date(customStartDate!!))} - ${bannerSdf.format(java.util.Date(customEndDate!!))}",
+                                style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF107C41)
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
-                        Column {
-                            Text(
-                                text = "OUTSTANDING BALANCE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-                            )
-                            Text(
-                                text = "Rs. %,.2f".format(totalOutstanding),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error
-                            )
+                        IconButton(
+                            onClick = { showCustomRangeDialog = true },
+                            modifier = Modifier.testTag("edit_custom_range_btn")
+                        ) {
+                            Icon(Icons.Filled.EditCalendar, contentDescription = "Edit Range", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
             }
 
-            // Invoices Status Breakdown Chart/Progress Indicators
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            var showAdvancedFilters by remember { mutableStateOf(false) }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Invoices Status Breakdown",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "Advanced Filters",
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    val totalCount = filteredInvoices.size.toFloat().coerceAtLeast(1f)
-
-                    ReportProgressBar(
-                        label = "Paid (${paidCount})",
-                        percentage = paidCount / totalCount,
-                        color = Color(0xFF107C41),
-                        amount = filteredInvoices.filter { it.invoice.status.equals("Paid", ignoreCase = true) }.sumOf { it.invoice.total }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    ReportProgressBar(
-                        label = "Sent (${sentCount})",
-                        percentage = sentCount / totalCount,
-                        color = MaterialTheme.colorScheme.primary,
-                        amount = filteredInvoices.filter { it.invoice.status.equals("Sent", ignoreCase = true) }.sumOf { it.invoice.total }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    ReportProgressBar(
-                        label = "Overdue (${overdueCount})",
-                        percentage = overdueCount / totalCount,
-                        color = MaterialTheme.colorScheme.error,
-                        amount = filteredInvoices.filter { it.invoice.status.equals("Overdue", ignoreCase = true) }.sumOf { it.invoice.total }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    ReportProgressBar(
-                        label = "Draft (${draftCount})",
-                        percentage = draftCount / totalCount,
-                        color = Color.Gray,
-                        amount = filteredInvoices.filter { it.invoice.status.equals("Draft", ignoreCase = true) }.sumOf { it.invoice.total }
+                    if (selectedCustomerFilter != "All" || selectedProductFilter != "All" || selectedCategoryFilter != "All" || selectedPaymentMethodFilter != "All" || selectedCurrencyFilter != "All") {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = { showAdvancedFilters = !showAdvancedFilters },
+                    modifier = Modifier.testTag("toggle_advanced_filters_btn")
+                ) {
+                    Text(if (showAdvancedFilters) "Hide" else "Show Options")
+                    Icon(
+                        if (showAdvancedFilters) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
 
-            // Client Statistics List
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Top Clients by Revenue",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    val clientsWithTotals = filteredInvoices.groupBy { it.invoice.clientName }
-                        .mapValues { entry -> entry.value.sumOf { it.invoice.total } }
-                        .toList()
-                        .sortedByDescending { it.second }
-                        .take(5)
-
-                    if (clientsWithTotals.isEmpty()) {
-                        Text(
-                            text = "No client billing data available.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                    } else {
-                        clientsWithTotals.forEachIndexed { index, (clientName, totalValue) ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primaryContainer),
-                                        contentAlignment = Alignment.Center
+            if (showAdvancedFilters) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Customer Selector
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Customer", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                var customerExpanded by remember { mutableStateOf(false) }
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { customerExpanded = true },
+                                        modifier = Modifier.fillMaxWidth().testTag("filter_customer_btn"),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                                     ) {
-                                        Text(
-                                            text = "${index + 1}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(selectedCustomerFilter, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
                                     }
-                                    Text(
-                                        text = clientName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    DropdownMenu(
+                                        expanded = customerExpanded,
+                                        onDismissRequest = { customerExpanded = false }
+                                    ) {
+                                        clientNames.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name, style = MaterialTheme.typography.bodyMedium) },
+                                                onClick = {
+                                                    selectedCustomerFilter = name
+                                                    customerExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
-                                Text(
-                                    text = "Rs. %,.2f".format(totalValue),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
                             }
-                            if (index < clientsWithTotals.size - 1) {
-                                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            // Product Selector
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Product", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                var productExpanded by remember { mutableStateOf(false) }
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { productExpanded = true },
+                                        modifier = Modifier.fillMaxWidth().testTag("filter_product_btn"),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(selectedProductFilter, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = productExpanded,
+                                        onDismissRequest = { productExpanded = false }
+                                    ) {
+                                        productNames.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name, style = MaterialTheme.typography.bodyMedium) },
+                                                onClick = {
+                                                    selectedProductFilter = name
+                                                    productExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Category Selector
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Category", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                var categoryExpanded by remember { mutableStateOf(false) }
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { categoryExpanded = true },
+                                        modifier = Modifier.fillMaxWidth().testTag("filter_category_btn"),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(selectedCategoryFilter, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = categoryExpanded,
+                                        onDismissRequest = { categoryExpanded = false }
+                                    ) {
+                                        categories.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name, style = MaterialTheme.typography.bodyMedium) },
+                                                onClick = {
+                                                    selectedCategoryFilter = name
+                                                    categoryExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Payment Method Selector
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Payment Method", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                var payExpanded by remember { mutableStateOf(false) }
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { payExpanded = true },
+                                        modifier = Modifier.fillMaxWidth().testTag("filter_payment_btn"),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(selectedPaymentMethodFilter, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = payExpanded,
+                                        onDismissRequest = { payExpanded = false }
+                                    ) {
+                                        paymentMethods.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name, style = MaterialTheme.typography.bodyMedium) },
+                                                onClick = {
+                                                    selectedPaymentMethodFilter = name
+                                                    payExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Currency Selector
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Currency (LKR / USD)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                var currencyExpanded by remember { mutableStateOf(false) }
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { currencyExpanded = true },
+                                        modifier = Modifier.fillMaxWidth().testTag("filter_currency_btn"),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(selectedCurrencyFilter, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = currencyExpanded,
+                                        onDismissRequest = { currencyExpanded = false }
+                                    ) {
+                                        currencies.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name, style = MaterialTheme.typography.bodyMedium) },
+                                                onClick = {
+                                                    selectedCurrencyFilter = name
+                                                    currencyExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Reset Button
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                TextButton(
+                                    onClick = {
+                                        selectedCustomerFilter = "All"
+                                        selectedProductFilter = "All"
+                                        selectedCategoryFilter = "All"
+                                        selectedPaymentMethodFilter = "All"
+                                        selectedCurrencyFilter = "All"
+                                    },
+                                    modifier = Modifier.testTag("reset_filters_btn")
+                                ) {
+                                    Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Reset", style = MaterialTheme.typography.labelMedium)
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Top Products selling
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Dashboard Cards/Widgets
+            DashboardMetricsWidgets(metrics = dashboardMetrics)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Sales Summary Section
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Top Products Cataloged",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                // Today's Sales Summary Table
+                SalesSummaryTable(
+                    title = "Today's Sales Summary",
+                    sales = todaySales,
+                    invoicesCount = todayInvoicesCount,
+                    customersCount = todayCustomersCount,
+                    avgInvoice = todayAverageInvoice
+                )
 
-                    // Group invoice item entities by description/name
-                    val productTotals = filteredInvoices.flatMap { it.items }
-                        .groupBy { it.name }
-                        .mapValues { entry -> entry.value.sumOf { it.total } }
-                        .toList()
-                        .sortedByDescending { it.second }
-                        .take(5)
+                // Monthly Sales Summary Table
+                SalesSummaryTable(
+                    title = "Monthly Sales Summary",
+                    sales = monthSales,
+                    invoicesCount = monthInvoicesCount,
+                    customersCount = monthCustomersCount,
+                    avgInvoice = monthAverageInvoice
+                )
 
-                    if (productTotals.isEmpty()) {
-                        Text(
-                            text = "No product sales data available.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                    } else {
-                        productTotals.forEachIndexed { index, (prodName, totalValue) ->
-                            Row(
+                // Pending Payments Row
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Inventory2,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Text(
-                                        text = prodName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Text(
-                                    text = "Rs. %,.2f".format(totalValue),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
+                                Icon(Icons.Filled.HourglassEmpty, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                             }
-                            if (index < productTotals.size - 1) {
-                                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Column {
+                                Text("Pending Payments (Overall)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Rs. %,.2f".format(totalOutstanding), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                             }
                         }
+                        
+                        Text(
+                            text = "Revenue Recd: Rs. %,.2f".format(totalRevenue),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF107C41),
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            // Subsections Navigation Hub
+            var selectedSection by remember { mutableStateOf("Top Products") }
+            val sections = listOf("Top Products", "Top Customers", "Payment Summary", "Sales Trend", "Profit Report", "Export Reports")
+
+            ScrollableTabRow(
+                selectedTabIndex = sections.indexOf(selectedSection).coerceAtLeast(0),
+                edgePadding = 16.dp,
+                containerColor = Color.Transparent,
+                divider = {},
+                modifier = Modifier.fillMaxWidth().testTag("reports_section_tab_row")
+            ) {
+                sections.forEach { section ->
+                    val selected = selectedSection == section
+                    Tab(
+                        selected = selected,
+                        onClick = { selectedSection = section },
+                        text = {
+                            Text(
+                                text = section,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        },
+                        selectedContentColor = MaterialTheme.colorScheme.primary,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Content body based on selection
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                when (selectedSection) {
+                    "Top Products" -> {
+                        val productTotals = remember(filteredInvoices) {
+                            filteredInvoices.flatMap { it.items }
+                                .groupBy { it.name }
+                                .mapValues { entry ->
+                                    val qty = entry.value.sumOf { it.quantity }
+                                    val total = entry.value.sumOf { it.total }
+                                    Pair(qty, total)
+                                }
+                                .toList()
+                                .sortedByDescending { it.second.second }
+                                .take(10)
+                        }
+
+                        val categoryTotals = remember(filteredInvoices, products) {
+                            filteredInvoices.flatMap { it.items }
+                                .groupBy { item ->
+                                    val matchedProduct = products.find { it.name.trim().equals(item.name.trim(), ignoreCase = true) }
+                                    matchedProduct?.category ?: "Other"
+                                }
+                                .mapValues { entry ->
+                                    entry.value.sumOf { it.total }
+                                }
+                                .toList()
+                                .sortedByDescending { it.second }
+                        }
+
+                        if (productTotals.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 40.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Filled.Inventory, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(48.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("No product sales data available.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                }
+                            }
+                        } else {
+                            val maxProdTotal = productTotals.maxOfOrNull { it.second.second }?.coerceAtLeast(1.0) ?: 1.0
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Text(
+                                            text = "Top Selling Products",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        )
+                                        Text(
+                                            text = "This can help guide purchasing and marketing.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(bottom = 16.dp)
+                                        )
+
+                                        // Header Row
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Product",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.weight(0.5f)
+                                            )
+                                            Text(
+                                                text = "Qty Sold",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.weight(0.2f),
+                                                textAlign = TextAlign.End
+                                            )
+                                            Text(
+                                                text = "Sales",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.weight(0.3f),
+                                                textAlign = TextAlign.End
+                                            )
+                                        }
+
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                        productTotals.forEachIndexed { index, (prodName, totals) ->
+                                            val (qty, totalValue) = totals
+                                            val matchedProduct = products.find { it.name.trim().equals(prodName.trim(), ignoreCase = true) }
+                                            
+                                            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    // Product Column (Name & Thumbnail)
+                                                    Row(
+                                                        modifier = Modifier.weight(0.5f),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        if (matchedProduct != null) {
+                                                            ProductImageThumbnail(
+                                                                imagePath = matchedProduct.imagePath,
+                                                                category = matchedProduct.category,
+                                                                name = matchedProduct.name,
+                                                                modifier = Modifier.size(32.dp)
+                                                            )
+                                                        } else {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(32.dp)
+                                                                    .clip(RoundedCornerShape(6.dp))
+                                                                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Filled.Inventory,
+                                                                    contentDescription = null,
+                                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                        Text(
+                                                            text = prodName,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.onSurface,
+                                                            maxLines = 2,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                    
+                                                    // Qty Sold Column
+                                                    Text(
+                                                        text = "%.0f".format(qty),
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        modifier = Modifier.weight(0.2f),
+                                                        textAlign = TextAlign.End
+                                                    )
+                                                    
+                                                    // Sales Column
+                                                    Text(
+                                                        text = "Rs. %,.0f".format(totalValue),
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.weight(0.3f),
+                                                        textAlign = TextAlign.End
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                LinearProgressIndicator(
+                                                    progress = (totalValue / maxProdTotal).toFloat(),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                                                )
+                                            }
+                                            if (index < productTotals.lastIndex) {
+                                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (categoryTotals.isNotEmpty()) {
+                                    val maxCategoryTotal = categoryTotals.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "Product Category Sales",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            )
+                                            Text(
+                                                text = "This shows which product categories perform best.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(bottom = 16.dp)
+                                            )
+
+                                            // Header Row
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Category",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.weight(0.6f)
+                                                )
+                                                Text(
+                                                    text = "Sales",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.weight(0.4f),
+                                                    textAlign = TextAlign.End
+                                                )
+                                            }
+
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                            categoryTotals.forEachIndexed { index, (categoryName, totalValue) ->
+                                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = categoryName,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.onSurface,
+                                                            modifier = Modifier.weight(0.6f)
+                                                        )
+                                                        Text(
+                                                            text = "Rs. %,.0f".format(totalValue),
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.weight(0.4f),
+                                                            textAlign = TextAlign.End
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                    LinearProgressIndicator(
+                                                        progress = (totalValue / maxCategoryTotal).toFloat(),
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                                                    )
+                                                }
+                                                if (index < categoryTotals.lastIndex) {
+                                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    "Top Customers" -> {
+                        val customerTotals = remember(filteredInvoices) {
+                            filteredInvoices
+                                .filter { it.invoice.clientName.isNotBlank() }
+                                .groupBy { it.invoice.clientName }
+                                .mapValues { entry ->
+                                    val count = entry.value.size
+                                    val total = entry.value.sumOf { it.invoice.total }
+                                    val pending = entry.value.filter { !it.invoice.status.equals("Paid", ignoreCase = true) }.sumOf { it.invoice.total }
+                                    Triple(count, total, pending)
+                                }
+                                .toList()
+                                .sortedByDescending { it.second.second }
+                                .take(10)
+                        }
+
+                        if (customerTotals.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 40.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Filled.People, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(48.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("No client sales data available.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                }
+                            }
+                        } else {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = "Top Customers",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                    Text(
+                                        text = "This can help guide purchasing and marketing.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 16.dp)
+                                    )
+
+                                    // Header Row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Customer",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Text(
+                                            text = "Total Purchases",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f),
+                                            textAlign = TextAlign.End
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                    customerTotals.forEachIndexed { index, pair ->
+                                        val clientName = pair.first
+                                        val stats = pair.second
+                                        val (invoiceCount, totalValue, pendingValue) = stats
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { selectedCustomerForDetail = clientName }
+                                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.weight(1f),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    val initial = clientName.take(1).uppercase()
+                                                    Text(
+                                                        text = "$initial",
+                                                        style = MaterialTheme.typography.titleSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                                    )
+                                                }
+                                                Column {
+                                                    Text(
+                                                        text = clientName,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    Text(
+                                                        text = "$invoiceCount invoices • Tap to see insights",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                                    )
+                                                }
+                                            }
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                horizontalAlignment = Alignment.End
+                                            ) {
+                                                Text(
+                                                    text = "Rs. %,.0f".format(totalValue),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                if (pendingValue > 0) {
+                                                    Text(
+                                                        text = "Unpaid: Rs. %,.0f".format(pendingValue),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.error,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (index < customerTotals.size - 1) {
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    "Payment Summary" -> {
+                        val paymentMethodsBreakdown = remember(filteredInvoices) {
+                            val cashAmt = filteredInvoices.filter { it.invoice.paymentMethod.trim().equals("Cash", ignoreCase = true) }.sumOf { it.invoice.total }
+                            val bankAmt = filteredInvoices.filter { it.invoice.paymentMethod.trim().equals("Bank Transfer", ignoreCase = true) }.sumOf { it.invoice.total }
+                            val cardAmt = filteredInvoices.filter { 
+                                val pm = it.invoice.paymentMethod.trim().lowercase()
+                                pm.contains("card") || pm.equals("credit card", ignoreCase = true) || pm.equals("debit card", ignoreCase = true) 
+                            }.sumOf { it.invoice.total }
+                            val onlineAmt = filteredInvoices.filter { 
+                                val pm = it.invoice.paymentMethod.trim().lowercase()
+                                pm.contains("online") || pm.contains("upi") || pm.contains("digital") || pm.contains("payment gateway") || pm.equals("online payment", ignoreCase = true)
+                            }.sumOf { it.invoice.total }
+                            
+                            val othersAmt = filteredInvoices.filter { 
+                                val pm = it.invoice.paymentMethod.trim().lowercase()
+                                !pm.equals("cash") && !pm.equals("bank transfer") && !pm.contains("card") && !pm.contains("online") && !pm.contains("upi") && !pm.contains("digital") && !pm.contains("payment gateway")
+                            }.sumOf { it.invoice.total }
+
+                            listOf(
+                                "Cash" to cashAmt,
+                                "Bank Transfer" to bankAmt,
+                                "Card" to cardAmt,
+                                "Online" to onlineAmt,
+                                "Others" to othersAmt
+                            )
+                        }
+
+                        val totalMethodAmt = paymentMethodsBreakdown.sumOf { it.second }.coerceAtLeast(1.0)
+
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = "Payment Summary",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                    Text(
+                                        text = "Revenue breakdown by payment channel",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 16.dp)
+                                    )
+
+                                    // Header Row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Method",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(0.5f)
+                                        )
+                                        Text(
+                                            text = "Amount",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(0.5f),
+                                            textAlign = TextAlign.End
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                    paymentMethodsBreakdown.forEachIndexed { index, (method, amount) ->
+                                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = method,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.weight(0.5f)
+                                                )
+                                                Text(
+                                                    text = "Rs. %,.0f".format(amount),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.weight(0.5f),
+                                                    textAlign = TextAlign.End
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            LinearProgressIndicator(
+                                                progress = (amount / totalMethodAmt).toFloat(),
+                                                color = when (method) {
+                                                    "Cash" -> Color(0xFF2E7D32)
+                                                    "Bank Transfer" -> Color(0xFF1565C0)
+                                                    "Card" -> Color(0xFFEF6C00)
+                                                    "Online" -> Color(0xFF6A1B9A)
+                                                    else -> MaterialTheme.colorScheme.secondary
+                                                },
+                                                trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                                            )
+                                        }
+                                        if (index < paymentMethodsBreakdown.size - 1) {
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                                        }
+                                    }
+                                }
+                            }
+
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = "Invoice Status Report",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                    Text(
+                                        text = "Useful for tracking outstanding work.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 16.dp)
+                                    )
+
+                                    val statusGroups = remember(filteredInvoices) {
+                                        val paidList = filteredInvoices.filter { it.invoice.status.trim().equals("Paid", ignoreCase = true) }
+                                        val pendingList = filteredInvoices.filter { 
+                                            val st = it.invoice.status.trim().lowercase()
+                                            st.equals("sent") || st.equals("overdue")
+                                        }
+                                        val draftList = filteredInvoices.filter { it.invoice.status.trim().equals("Draft", ignoreCase = true) }
+                                        val cancelledList = filteredInvoices.filter { 
+                                            it.invoice.status.trim().lowercase().contains("cancel") 
+                                        }
+
+                                        listOf(
+                                            Triple("Paid", paidList.size, paidList.sumOf { it.invoice.total }),
+                                            Triple("Pending", pendingList.size, pendingList.sumOf { it.invoice.total }),
+                                            Triple("Draft", draftList.size, draftList.sumOf { it.invoice.total }),
+                                            Triple("Cancelled", cancelledList.size, cancelledList.sumOf { it.invoice.total })
+                                        )
+                                    }
+
+                                    // Header Row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Status",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(0.45f)
+                                        )
+                                        Text(
+                                            text = "Count",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(0.15f),
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Text(
+                                            text = "Total Value",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(0.4f),
+                                            textAlign = TextAlign.End
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                    statusGroups.forEachIndexed { index, (statusLabel, count, totalValue) ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.weight(0.45f),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                val (icon, color) = when (statusLabel) {
+                                                    "Paid" -> Icons.Filled.CheckCircle to Color(0xFF107C41)
+                                                    "Pending" -> Icons.Filled.Pending to Color(0xFFF2994A)
+                                                    "Draft" -> Icons.Filled.Schedule to Color(0xFF1976D2)
+                                                    else -> Icons.Filled.Cancel to Color(0xFFD32F2F)
+                                                }
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = null,
+                                                    tint = color,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Text(
+                                                    text = statusLabel,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "$count",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(0.15f),
+                                                textAlign = TextAlign.Center
+                                            )
+
+                                            Text(
+                                                text = "Rs. %,.0f".format(totalValue),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(0.4f),
+                                                textAlign = TextAlign.End
+                                            )
+                                        }
+                                        if (index < statusGroups.size - 1) {
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    "Sales Trend" -> {
+                        var trendViewMode by remember { mutableStateOf("Daily") } // "Daily" or "Monthly"
+                        
+                        val dailyTotals = remember(filteredInvoices) {
+                            val calendar = java.util.Calendar.getInstance()
+                            val totals = DoubleArray(7)
+                            filteredInvoices.forEach { iv ->
+                                calendar.timeInMillis = iv.invoice.issueDate
+                                val day = calendar.get(java.util.Calendar.DAY_OF_WEEK)
+                                val index = when (day) {
+                                    java.util.Calendar.MONDAY -> 0
+                                    java.util.Calendar.TUESDAY -> 1
+                                    java.util.Calendar.WEDNESDAY -> 2
+                                    java.util.Calendar.THURSDAY -> 3
+                                    java.util.Calendar.FRIDAY -> 4
+                                    java.util.Calendar.SATURDAY -> 5
+                                    java.util.Calendar.SUNDAY -> 6
+                                    else -> -1
+                                }
+                                if (index != -1) {
+                                    totals[index] += iv.invoice.total
+                                }
+                            }
+                            listOf(
+                                "Mon" to totals[0],
+                                "Tue" to totals[1],
+                                "Wed" to totals[2],
+                                "Thu" to totals[3],
+                                "Fri" to totals[4],
+                                "Sat" to totals[5],
+                                "Sun" to totals[6]
+                            )
+                        }
+
+                        val monthlyTotals = remember(filteredInvoices) {
+                            val calendar = java.util.Calendar.getInstance()
+                            val totals = DoubleArray(12)
+                            filteredInvoices.forEach { iv ->
+                                calendar.timeInMillis = iv.invoice.issueDate
+                                val month = calendar.get(java.util.Calendar.MONTH)
+                                if (month in 0..11) {
+                                    totals[month] += iv.invoice.total
+                                }
+                            }
+                            listOf(
+                                "Jan" to totals[0],
+                                "Feb" to totals[1],
+                                "Mar" to totals[2],
+                                "Apr" to totals[3],
+                                "May" to totals[4],
+                                "Jun" to totals[5],
+                                "Jul" to totals[6],
+                                "Aug" to totals[7],
+                                "Sep" to totals[8],
+                                "Oct" to totals[9],
+                                "Nov" to totals[10],
+                                "Dec" to totals[11]
+                            )
+                        }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Sales Trend",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Analyze busy and slow periods",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    
+                                    // Segmented Toggle
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                            .padding(2.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        listOf("Daily", "Monthly").forEach { mode ->
+                                            val isSelected = trendViewMode == mode
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                                    .clickable { trendViewMode = mode }
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = mode,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.height(16.dp))
+                                
+                                val activeData = if (trendViewMode == "Daily") dailyTotals else monthlyTotals
+                                val totalRevenueForPeriod = activeData.sumOf { it.second }
+                                
+                                if (totalRevenueForPeriod == 0.0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 40.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                Icons.Filled.TrendingUp,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                                modifier = Modifier.size(48.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = "No sales activity in this period",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    HorizontalSalesBarChart(data = activeData, currencySym = "Rs. ")
+                                }
+                            }
+                        }
+                    }
+
+                    "Profit Report" -> {
+                        val validInvoices = remember(filteredInvoices) {
+                            filteredInvoices.filter { !it.invoice.status.trim().equals("Cancelled", ignoreCase = true) }
+                        }
+                        val profitData = remember(validInvoices, products) {
+                            var totalSales = 0.0
+                            var totalCost = 0.0
+                            for (inv in validInvoices) {
+                                totalSales += inv.invoice.total
+                                for (item in inv.items) {
+                                    val matchedProduct = products.find { it.name.trim().equals(item.name.trim(), ignoreCase = true) }
+                                    val itemCostPrice = matchedProduct?.costPrice ?: 0.0
+                                    totalCost += item.quantity * itemCostPrice
+                                }
+                            }
+                            val grossProfit = totalSales - totalCost
+                            Triple(totalSales, totalCost, grossProfit)
+                        }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth().testTag("profit_report_card"),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(20.dp)) {
+                                Text(
+                                    text = "Profit Report (Version 2)",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                )
+                                Text(
+                                    text = "If cost prices are stored:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
+
+                                val (sales, cost, grossProfit) = profitData
+
+                                // Sales Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Sales",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Rs. %,.0f".format(sales),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                // Cost Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Cost",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Rs. %,.0f".format(cost),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                // Gross Profit Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (grossProfit >= 0) Color(0xFF107C41).copy(alpha = 0.08f)
+                                            else MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Gross Profit",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (grossProfit >= 0) Color(0xFF107C41) else MaterialTheme.colorScheme.error
+                                    )
+                                    Text(
+                                        text = "Rs. %,.0f".format(grossProfit),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = if (grossProfit >= 0) Color(0xFF107C41) else MaterialTheme.colorScheme.error
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Text(
+                                    text = "This requires maintaining accurate cost prices.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            }
+                        }
+                    }
+
+                    "Export Reports" -> {
+                        var chosenReportType by remember { mutableStateOf("Daily Sales") }
+                        var chosenFormat by remember { mutableStateOf("PDF") }
+                        
+                        val reportTypes = listOf(
+                            "Daily Sales", "Monthly Sales", "Customer Report", 
+                            "Product Report", "Payment Report", "Inventory Report"
+                        )
+                        val formats = listOf("PDF", "CSV", "Excel")
+                        
+                        // Construct the period label dynamically
+                        val currentFilterLabel = remember(selectedFilter, customStartDate, customEndDate) {
+                            if (selectedFilter == "Custom Date Range") {
+                                val sdf = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+                                val sStr = customStartDate?.let { sdf.format(java.util.Date(it)) } ?: "Start"
+                                val eStr = customEndDate?.let { sdf.format(java.util.Date(it)) } ?: "End"
+                                "$sStr to $eStr"
+                            } else {
+                                selectedFilter
+                            }
+                        }
+
+                        // Generate the live report text preview
+                        val reportText = remember(filteredInvoices, products, chosenReportType, currentFilterLabel) {
+                            ReportExportService.generateTextReport(chosenReportType, filteredInvoices, products, currentFilterLabel)
+                        }
+
+                        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            // Selector Card
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text(
+                                        "Configure Report",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    
+                                    // Report Type Dropdown
+                                    Column {
+                                        Text("Report Type", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        var reportDropdownExpanded by remember { mutableStateOf(false) }
+                                        Box(modifier = Modifier.fillMaxWidth()) {
+                                            OutlinedButton(
+                                                onClick = { reportDropdownExpanded = true },
+                                                modifier = Modifier.fillMaxWidth().testTag("export_report_type_selector_btn"),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        Icon(Icons.Filled.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                                        Text(chosenReportType, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                                                    }
+                                                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = reportDropdownExpanded,
+                                                onDismissRequest = { reportDropdownExpanded = false },
+                                                modifier = Modifier.fillMaxWidth(0.9f)
+                                            ) {
+                                                reportTypes.forEach { type ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(type, fontWeight = FontWeight.Medium) },
+                                                        onClick = {
+                                                            chosenReportType = type
+                                                            reportDropdownExpanded = false
+                                                        },
+                                                        leadingIcon = {
+                                                            val icon = when(type) {
+                                                                "Daily Sales" -> Icons.Filled.Today
+                                                                "Monthly Sales" -> Icons.Filled.CalendarMonth
+                                                                "Customer Report" -> Icons.Filled.People
+                                                                "Product Report" -> Icons.Filled.Inventory
+                                                                "Payment Report" -> Icons.Filled.Payments
+                                                                "Inventory Report" -> Icons.Filled.Warehouse
+                                                                else -> Icons.Filled.Description
+                                                            }
+                                                            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Format selection row
+                                    Column {
+                                        Text("Export Format", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            formats.forEach { format ->
+                                                val isSelected = chosenFormat == format
+                                                val containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                                                val contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                                val borderStroke = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                                
+                                                Surface(
+                                                    onClick = { chosenFormat = format },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = containerColor,
+                                                    contentColor = contentColor,
+                                                    border = borderStroke,
+                                                    modifier = Modifier.weight(1f).height(48.dp).testTag("format_chip_$format"),
+                                                ) {
+                                                    Row(
+                                                        horizontalArrangement = Arrangement.Center,
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        val formatIcon = when (format) {
+                                                            "PDF" -> Icons.Filled.PictureAsPdf
+                                                            "CSV" -> Icons.Filled.GridOn
+                                                            "Excel" -> Icons.Filled.TableChart
+                                                            else -> Icons.Filled.InsertDriveFile
+                                                        }
+                                                        Icon(formatIcon, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(format, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Preview Card
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Live Preview (${chosenReportType})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                        
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(reportText))
+                                                    Toast.makeText(context, "Copied text report to clipboard!", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.testTag("btn_copy_report")
+                                            ) {
+                                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy text report", tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    val sendIntent = android.content.Intent().apply {
+                                                        action = android.content.Intent.ACTION_SEND
+                                                        putExtra(android.content.Intent.EXTRA_TEXT, reportText)
+                                                        type = "text/plain"
+                                                    }
+                                                    context.startActivity(android.content.Intent.createChooser(sendIntent, "Share text report"))
+                                                },
+                                                modifier = Modifier.testTag("btn_share_report")
+                                            ) {
+                                                Icon(Icons.Filled.Share, contentDescription = "Share text report", tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(260.dp)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                            .verticalScroll(rememberScrollState())
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = reportText,
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                fontSize = 11.sp
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    // Primary Export Button
+                                    Button(
+                                        onClick = {
+                                            val sanitizedReportName = chosenReportType.replace(" ", "_").lowercase()
+                                            when (chosenFormat) {
+                                                "PDF" -> {
+                                                    try {
+                                                        val reportFile = ReportExportService.generatePdfReport(
+                                                            context = context,
+                                                            reportType = chosenReportType,
+                                                            invoices = filteredInvoices,
+                                                            products = products,
+                                                            filterLabel = currentFilterLabel
+                                                        )
+                                                        if (reportFile != null && reportFile.exists()) {
+                                                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                                                context,
+                                                                "com.example.fileprovider",
+                                                                reportFile
+                                                            )
+                                                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                                type = "application/pdf"
+                                                                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                            }
+                                                            context.startActivity(android.content.Intent.createChooser(intent, "Share PDF Report"))
+                                                            Toast.makeText(context, "PDF Report exported successfully!", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            Toast.makeText(context, "Failed to generate PDF Report", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Error exporting PDF: ${e.message}", Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                                "CSV" -> {
+                                                    try {
+                                                        val csvContent = ReportExportService.generateCsvReport(
+                                                            reportType = chosenReportType,
+                                                            invoices = filteredInvoices,
+                                                            products = products,
+                                                            filterLabel = currentFilterLabel
+                                                        )
+                                                        val reportFile = java.io.File(context.cacheDir, "${sanitizedReportName}_report.csv")
+                                                        java.io.FileOutputStream(reportFile).use { out ->
+                                                            out.write(csvContent.toByteArray())
+                                                        }
+                                                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                                                            context,
+                                                            "com.example.fileprovider",
+                                                            reportFile
+                                                        )
+                                                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                            type = "text/csv"
+                                                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        }
+                                                        context.startActivity(android.content.Intent.createChooser(intent, "Share CSV Report"))
+                                                        Toast.makeText(context, "CSV Report exported successfully!", Toast.LENGTH_SHORT).show()
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Error exporting CSV: ${e.message}", Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                                "Excel" -> {
+                                                    try {
+                                                        val excelContent = ReportExportService.generateExcelReport(
+                                                            reportType = chosenReportType,
+                                                            invoices = filteredInvoices,
+                                                            products = products,
+                                                            filterLabel = currentFilterLabel
+                                                        )
+                                                        val reportFile = java.io.File(context.cacheDir, "${sanitizedReportName}_report.xls")
+                                                        java.io.FileOutputStream(reportFile).use { out ->
+                                                            out.write(excelContent.toByteArray())
+                                                        }
+                                                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                                                            context,
+                                                            "com.example.fileprovider",
+                                                            reportFile
+                                                        )
+                                                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                            type = "application/vnd.ms-excel"
+                                                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        }
+                                                        context.startActivity(android.content.Intent.createChooser(intent, "Share Excel Report"))
+                                                        Toast.makeText(context, "Excel Report exported successfully!", Toast.LENGTH_SHORT).show()
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Error exporting Excel: ${e.message}", Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().height(52.dp).testTag("btn_export_generate_report"),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF107C41))
+                                    ) {
+                                        val mainIcon = when(chosenFormat) {
+                                            "PDF" -> Icons.Filled.PictureAsPdf
+                                            "CSV" -> Icons.Filled.GridOn
+                                            "Excel" -> Icons.Filled.TableChart
+                                            else -> Icons.Filled.Download
+                                        }
+                                        Icon(mainIcon, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Generate & Share ${chosenFormat}", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DashboardMetricsWidgets(
+    metrics: com.example.services.DashboardMetrics,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            DashboardMetricCard(
+                title = "Today's Sales",
+                value = "Rs. %,.2f".format(metrics.todaySales),
+                icon = Icons.Filled.Today,
+                iconColor = MaterialTheme.colorScheme.primary,
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                modifier = Modifier.weight(1f).testTag("card_todays_sales")
+            )
+            DashboardMetricCard(
+                title = "Monthly Sales",
+                value = "Rs. %,.2f".format(metrics.monthlySales),
+                icon = Icons.Filled.DateRange,
+                iconColor = Color(0xFF107C41),
+                containerColor = Color(0xFF107C41).copy(alpha = 0.1f),
+                modifier = Modifier.weight(1f).testTag("card_monthly_sales")
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            DashboardMetricCard(
+                title = "Total Invoices",
+                value = "${metrics.totalInvoices}",
+                icon = Icons.Filled.Description,
+                iconColor = Color(0xFFE67E22),
+                containerColor = Color(0xFFE67E22).copy(alpha = 0.1f),
+                modifier = Modifier.weight(1f).testTag("card_total_invoices")
+            )
+            DashboardMetricCard(
+                title = "Active Customers",
+                value = "${metrics.activeCustomers}",
+                icon = Icons.Filled.People,
+                iconColor = MaterialTheme.colorScheme.secondary,
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+                modifier = Modifier.weight(1f).testTag("card_active_customers")
+            )
+        }
+    }
+}
+
+@Composable
+fun DashboardMetricCard(
+    title: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconColor: Color,
+    containerColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(containerColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+fun SalesSummaryTable(
+    title: String,
+    sales: Double,
+    invoicesCount: Int,
+    customersCount: Int,
+    avgInvoice: Double,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            // Header Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Metric",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Value",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            
+            val rowPadding = Modifier.padding(vertical = 8.dp)
+            
+            // Sales Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rowPadding),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(
+                        Icons.Filled.TrendingUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text("Sales", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                }
+                Text(
+                    "Rs. %,.0f".format(sales),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            
+            // Invoices Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rowPadding),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(
+                        Icons.Filled.Description,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text("Invoices", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                }
+                Text(
+                    "$invoicesCount",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            
+            // Customers Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rowPadding),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(
+                        Icons.Filled.People,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text("Customers", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                }
+                Text(
+                    "$customersCount",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            
+            // Average Invoice Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rowPadding),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(
+                        Icons.Filled.MonetizationOn,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text("Average Invoice", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                }
+                Text(
+                    "Rs. %,.0f".format(avgInvoice),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun HorizontalSalesBarChart(
+    data: List<Pair<String, Double>>,
+    currencySym: String = "Rs. "
+) {
+    val maxVal = remember(data) { data.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0 }
+    
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) {
+        data.forEach { (label, value) ->
+            val fraction = (value / maxVal).toFloat()
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Label
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.width(42.dp)
+                )
+                
+                // Bar track and actual filled progress bar
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                ) {
+                    if (value > 0) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(fraction)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primary,
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                        )
+                                    )
+                                )
+                        )
+                    }
+                }
+                
+                // Value text
+                Text(
+                    text = if (value > 0) "$currencySym%,.0f".format(value) else "${currencySym}0",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (value > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(85.dp),
+                    textAlign = TextAlign.End
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SalesTrendChart(
+    trendPoints: List<TrendPoint>,
+    currencySym: String = "Rs."
+) {
+    if (trendPoints.isEmpty() || trendPoints.all { it.value == 0.0 }) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Filled.TrendingUp, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(48.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("No sales activity in this period", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            }
+        }
+        return
+    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val maxValue = remember(trendPoints) {
+        trendPoints.maxOfOrNull { it.value }?.toDouble()?.coerceAtLeast(100.0) ?: 100.0
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Revenue Trend", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp)
+            ) {
+                val width = size.width
+                val height = size.height
+                
+                val paddingLeft = 70f
+                val paddingBottom = 40f
+                val paddingTop = 20f
+                val paddingRight = 20f
+                
+                val chartWidth = width - paddingLeft - paddingRight
+                val chartHeight = height - paddingTop - paddingBottom
+                
+                // Draw 4 Gridlines (Y-axis grid)
+                val gridLinesCount = 3
+                for (i in 0..gridLinesCount) {
+                    val y = paddingTop + chartHeight * (1f - i.toFloat() / gridLinesCount)
+                    drawLine(
+                        color = labelColor.copy(alpha = 0.1f),
+                        start = androidx.compose.ui.geometry.Offset(paddingLeft, y),
+                        end = androidx.compose.ui.geometry.Offset(width - paddingRight, y),
+                        strokeWidth = 2f
+                    )
+                    
+                    // Draw Y labels
+                    val labelValue = maxValue * (i.toFloat() / gridLinesCount)
+                    val labelText = if (labelValue >= 1000) "%.1fk".format(labelValue / 1000) else "%.0f".format(labelValue)
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "$currencySym$labelText",
+                        10f,
+                        y + 10f,
+                        android.graphics.Paint().apply {
+                            color = labelColor.toArgb()
+                            textSize = 24f
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        }
+                    )
+                }
+                
+                // Draw points and lines
+                if (trendPoints.size > 1) {
+                    val points = trendPoints.mapIndexed { index, point ->
+                        val x = paddingLeft + (index.toFloat() / (trendPoints.size - 1)) * chartWidth
+                        val y = paddingTop + chartHeight * (1f - (point.value / maxValue).toFloat())
+                        androidx.compose.ui.geometry.Offset(x, y)
+                    }
+                    
+                    // Line Path
+                    val linePath = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(points[0].x, points[0].y)
+                        for (i in 1 until points.size) {
+                            // cubic-bezier interpolation
+                            val prev = points[i - 1]
+                            val curr = points[i]
+                            val cp1X = prev.x + (curr.x - prev.x) / 2f
+                            cubicTo(cp1X, prev.y, cp1X, curr.y, curr.x, curr.y)
+                        }
+                    }
+                    
+                    // Fill Path (gradient below line)
+                    val fillPath = androidx.compose.ui.graphics.Path().apply {
+                        addPath(linePath)
+                        lineTo(points.last().x, paddingTop + chartHeight)
+                        lineTo(points.first().x, paddingTop + chartHeight)
+                        close()
+                    }
+                    
+                    // Draw filled area with gradient
+                    drawPath(
+                        path = fillPath,
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(primaryColor.copy(alpha = 0.35f), Color.Transparent),
+                            startY = paddingTop,
+                            endY = paddingTop + chartHeight
+                        )
+                    )
+                    
+                    // Draw curve line
+                    drawPath(
+                        path = linePath,
+                        color = primaryColor,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f)
+                    )
+                    
+                    // Draw X Labels and dots
+                    trendPoints.forEachIndexed { index, point ->
+                        val pt = points[index]
+                        
+                        // Dot
+                        drawCircle(
+                            color = primaryColor,
+                            radius = 6f,
+                            center = pt
+                        )
+                        drawCircle(
+                            color = Color.White,
+                            radius = 3f,
+                            center = pt
+                        )
+                        
+                        // Label text (skip some if too crowded)
+                        val skipCount = when {
+                            trendPoints.size > 10 -> 2
+                            else -> 0
+                        }
+                        if (skipCount == 0 || index % skipCount == 0 || index == trendPoints.size - 1) {
+                            drawContext.canvas.nativeCanvas.drawText(
+                                point.label,
+                                pt.x - 25f,
+                                height - 5f,
+                                android.graphics.Paint().apply {
+                                    color = labelColor.copy(alpha = 0.8f).toArgb()
+                                    textSize = 24f
+                                }
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -5243,7 +7665,19 @@ fun InvoiceHistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Invoice History", fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_ceyvana_logo_1783697111340),
+                            contentDescription = "Ceyvana Logo",
+                            modifier = Modifier.size(28.dp).clip(CircleShape)
+                        )
+                        Text("Invoice History", fontWeight = FontWeight.Bold)
+                    }
+                },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -5716,5 +8150,258 @@ fun formatCurrency(amount: Double, currency: String): String {
     } else {
         "Rs. %,.2f".format(amount)
     }
+}
+
+@Composable
+fun CustomerReportDetailDialog(
+    clientName: String,
+    allInvoices: List<InvoiceWithItems>,
+    onDismiss: () -> Unit
+) {
+    val sdfDisplay = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+    
+    // Find all invoices for this specific client
+    val clientInvoices = remember(allInvoices, clientName) {
+        allInvoices.filter { it.invoice.clientName.trim().equals(clientName.trim(), ignoreCase = true) }
+            .sortedByDescending { it.invoice.issueDate }
+    }
+    
+    val totalInvoicesCount = clientInvoices.size
+    val totalPurchases = clientInvoices.sumOf { it.invoice.total }
+    val lastPurchaseDate = clientInvoices.firstOrNull()?.invoice?.issueDate?.let {
+        sdfDisplay.format(java.util.Date(it))
+    } ?: "N/A"
+    
+    val outstandingBalance = clientInvoices
+        .filter { !it.invoice.status.equals("Paid", ignoreCase = true) }
+        .sumOf { it.invoice.total }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "Customer Insights",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = clientName,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+            ) {
+                // Key metrics row/grid
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Total Invoices Card
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                "Invoices",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "$totalInvoicesCount",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    // Outstanding Balance Card
+                    Card(
+                        modifier = Modifier.weight(1.5f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (outstandingBalance > 0) 
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f) 
+                            else 
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                "Outstanding",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (outstandingBalance > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Rs. %,.0f".format(outstandingBalance),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (outstandingBalance > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Last Purchase Date",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            lastPurchaseDate,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Invoices",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                if (clientInvoices.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No invoices found",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        clientInvoices.forEachIndexed { index, item ->
+                            val inv = item.invoice
+                            val formattedDate = remember(inv.issueDate) {
+                                sdfDisplay.format(java.util.Date(inv.issueDate))
+                            }
+                            
+                            if (index > 0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = "--------------------------------------",
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = inv.invoiceNumber,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    val statusColor = when (inv.status) {
+                                        "Paid" -> Color(0xFF107C41)
+                                        "Overdue" -> MaterialTheme.colorScheme.error
+                                        "Sent" -> Color(0xFFF2994A)
+                                        else -> MaterialTheme.colorScheme.outline
+                                    }
+                                    Text(
+                                        text = inv.status,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = statusColor,
+                                        modifier = Modifier
+                                            .background(statusColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                
+                                Text(
+                                    text = "Rs. %,.0f".format(inv.total),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                Text(
+                                    text = formattedDate,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Close")
+            }
+        },
+        shape = RoundedCornerShape(16.dp)
+    )
 }
 

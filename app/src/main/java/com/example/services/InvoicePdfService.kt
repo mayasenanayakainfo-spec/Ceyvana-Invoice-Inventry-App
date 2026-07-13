@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import com.example.data.model.InvoiceWithItems
+import com.example.R
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -71,16 +72,17 @@ object InvoicePdfService {
 
         // 1. Load and Render Company Logo
         val logoBitmap = try {
-            context.assets.open("logo.png").use { inputStream ->
-                BitmapFactory.decodeStream(inputStream)
-            }
+            BitmapFactory.decodeResource(context.resources, R.drawable.ceyvana_invoice_logo_1783697801136)
+                ?: context.assets.open("logo.png").use { inputStream ->
+                    BitmapFactory.decodeStream(inputStream)
+                }
         } catch (e: Exception) {
             null
         }
 
         if (logoBitmap != null) {
-            val logoWidth = 64f
-            val logoHeight = 64f
+            val logoWidth = 80f
+            val logoHeight = 80f
             val logoX = (595f - logoWidth) / 2
             val logoRect = RectF(logoX, currentY, logoX + logoWidth, currentY + logoHeight)
             canvas.drawBitmap(logoBitmap, null, logoRect, null)

@@ -33,5 +33,6 @@ val StatusPaid = Color(0xFF2E7D32)            // Forest Green
 val StatusSent = Color(0xFFF57C00)            // Orange Accent
 val StatusOverdue = Color(0xFFD32F2F)         // Crimson Red
 val StatusDraft = Color(0xFF1976D2)           // Cobalt Blue
+val StatusCancelled = Color(0xFF757575)       // Neutral Grey for Cancelled
 
 
